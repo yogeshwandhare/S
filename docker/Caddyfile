@@ -1,0 +1,35 @@
+{
+	# Local/demo default: plain HTTP on :80 inside the container.
+	# For a real deployment with a public domain, replace ":80" below with
+	# your domain name (e.g. "smartvision.example.com") and Caddy will
+	# automatically obtain and renew a Let's Encrypt certificate -- no
+	# other config changes needed. For localhost-only HTTPS during
+	# development, use "tls internal" instead.
+	auto_https off
+}
+
+:80 {
+	encode gzip
+
+	# API + real-time endpoints -> backend container.
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle /ws/* {
+		reverse_proxy backend:8000
+	}
+
+	# Everything else -> the built React app (client-side routing fallback).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}

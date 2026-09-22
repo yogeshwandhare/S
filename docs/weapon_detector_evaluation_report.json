@@ -1,0 +1,55 @@
+{
+  "checkpoint": "/tmp/weapon_model_output/train/weights/best.pt",
+  "dataset": "/tmp/weapon_dataset_prepared/dataset.yaml",
+  "split": "test",
+  "overall": {
+    "precision": 0.658066758689636,
+    "recall": 0.2715854943867689,
+    "mAP50": 0.2981083973112703,
+    "mAP50-95": 0.186382872740589
+  },
+  "speed_ms_per_image": {
+    "preprocess": 0.6838121599985243,
+    "inference": 15.307887928001946,
+    "loss": 7.743200148979668e-05,
+    "postprocess": 0.5728751039996496
+  },
+  "per_class": {
+    "pistol": {
+      "precision": 0.4140146326617157,
+      "recall": 0.3333333333333333,
+      "mAP50": 0.28375799381849864,
+      "mAP50-95": 0.16209174315219477
+    },
+    "smartphone": {
+      "precision": 0.5284370283409148,
+      "recall": 0.6,
+      "mAP50": 0.5461152108601858,
+      "mAP50-95": 0.39818902987302296
+    },
+    "knife": {
+      "precision": 0.5815226299989044,
+      "recall": 0.2961796329872801,
+      "mAP50": 0.3675836495068514,
+      "mAP50-95": 0.144200331641653
+    },
+    "monedero": {
+      "precision": 1.0,
+      "recall": 0.0,
+      "mAP50": 0.12121578204509156,
+      "mAP50-95": 0.08265255159069364
+    },
+    "billete": {
+      "precision": 0.42442626113628146,
+      "recall": 0.4,
+      "mAP50": 0.3025820962663067,
+      "mAP50-95": 0.2408536962693309
+    },
+    "tarjeta": {
+      "precision": 1.0,
+      "recall": 0.0,
+      "mAP50": 0.16739565137068757,
+      "mAP50-95": 0.09030988391663879
+    }
+  }
+}

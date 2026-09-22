@@ -1,0 +1,31 @@
+[project]
+name = "smartvision-vision-worker"
+version = "0.1.0"
+description = "Camera ingest, detection, tracking, and rule-engine modules for SmartVision."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "opencv-python-headless>=4.10,<5.0",
+    "numpy>=1.26,<3.0",
+]
+
+[project.optional-dependencies]
+# Apache-2.0 default object detector.
+rfdetr = ["rfdetr>=1.10,<2.0"]
+# Optional AGPL-3.0 adapter -- never enabled by default (see docs/MODEL_REGISTRY.md).
+yolo = ["ultralytics>=8.4,<9.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vision_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: exercises real model inference; may download a checkpoint on first run",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "ruff>=0.8", "mypy>=1.13"]

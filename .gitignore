@@ -1,0 +1,46 @@
+# Secrets
+.env
+
+# Python
+backend/.venv/
+backend/.venv_uv_test/
+**/__pycache__/
+*.pyc
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.mypy_cache/
+*.db
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Evidence & data (never committed -- local-first by design)
+evidence_storage/*
+!evidence_storage/.gitkeep
+sample_data/*.mp4
+sample_data/*.mkv
+# Exception: a small, clearly-labeled synthetic clip used by the vision
+# pipeline's own test suite and as a no-hardware-required demo camera
+# source (see sample_data/README.md).
+!sample_data/synthetic_pipeline_test.mp4
+
+# Model checkpoints (downloaded, not committed -- see scripts/download_models.py)
+models/*.pt
+models/*.onnx
+models/*.pth
+*.pt
+*.pth
+*.onnx
+
+# Ultralytics' default working-directory dump for training/validation runs
+# (confusion matrices, PR curves, sample predictions). A curated copy of
+# one real evaluation run is committed under docs/weapon_detector_validation/
+# instead -- see that directory's README.
+/runs/
+
+# OS / editor
+.DS_Store
+.vscode/
+*.swp

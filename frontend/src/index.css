@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+/*
+ * SmartVision design tokens.
+ *
+ * The palette is deliberately grounded in real monitoring-console
+ * conventions rather than generic dashboard defaults: a deep blue-black
+ * base (low-glare, the way NOC/CCTV rooms are actually lit), a single
+ * "phosphor teal" accent for healthy/active state, and a functional
+ * severity scale that is never used decoratively -- color always means
+ * something specific (camera health, incident severity, AI vs. human
+ * confirmation).
+ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-bg: #0a0e14;
+  --color-surface: #101720;
+  --color-surface-raised: #16202b;
+  --color-surface-hover: #1b2733;
+  --color-border: #223140;
+  --color-border-strong: #2c4053;
+
+  --color-text: #e6edf3;
+  --color-text-muted: #7c8b9a;
+  --color-text-faint: #4d5c6b;
+
+  --color-teal: #2dd4bf;
+  --color-teal-dim: #134e4a;
+  --color-cyan: #38bdf8;
+  --color-cyan-dim: #0c4a6e;
+
+  --color-severity-low: #64748b;
+  --color-severity-medium: #f59e0b;
+  --color-severity-high: #f97316;
+  --color-severity-critical: #ef4444;
+
+  --color-status-online: #2dd4bf;
+  --color-status-offline: #4d5c6b;
+  --color-status-error: #ef4444;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: var(--color-teal-dim);
+    color: var(--color-text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-cyan);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    background-color: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--color-border);
+  }
+
+  .pulse-new {
+    animation: sv-pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes sv-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
