@@ -29,6 +29,7 @@ def main() -> int:
     parser.add_argument("--dataset", required=True, type=Path)
     parser.add_argument("--split", default="test", choices=["train", "val", "test"])
     parser.add_argument("--imgsz", type=int, default=320)
+    parser.add_argument("--batch", type=int, default=4)
     args = parser.parse_args()
 
     try:
@@ -53,6 +54,8 @@ def main() -> int:
         split=args.split,
         imgsz=args.imgsz,
         device="cpu",
+        batch=args.batch,
+        workers=0,
         verbose=True,
     )
 
@@ -72,7 +75,7 @@ def main() -> int:
     }
 
     # ultralytics reports per-class AP in the order of `metrics.ap_class_index`.
-    for i, class_idx in enumerate(metrics.ap_class_index):
+    for i, class_idx in enumerate(metrics.box.ap_class_index):
         name = class_names[int(class_idx)]
         report["per_class"][name] = {
             "precision": float(metrics.box.p[i]),

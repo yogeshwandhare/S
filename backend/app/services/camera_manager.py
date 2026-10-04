@@ -33,6 +33,7 @@ settings = get_settings()
 
 _SOURCE_TYPE_MAP = {
     CameraSourceType.RTSP: SourceType.RTSP,
+    CameraSourceType.HTTP: SourceType.HTTP,
     CameraSourceType.FILE: SourceType.FILE,
     CameraSourceType.USB: SourceType.USB,
 }

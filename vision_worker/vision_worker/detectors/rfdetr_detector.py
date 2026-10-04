@@ -75,7 +75,9 @@ class RFDetrNanoDetector(Detector):
 
     def detect(self, frame_bgr: np.ndarray, confidence_threshold: float) -> list[Detection]:
         # rfdetr expects RGB; OpenCV frames are BGR.
-        frame_rgb = frame_bgr[:, :, ::-1]
+        # Channel reversal creates negative strides, which torch.from_numpy
+        # cannot consume. Materialize a contiguous RGB array for RF-DETR.
+        frame_rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
 
         detections = self._model.predict(
             frame_rgb, threshold=max(confidence_threshold, _CONFIDENCE_FLOOR)

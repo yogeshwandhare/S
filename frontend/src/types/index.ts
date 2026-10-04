@@ -35,7 +35,7 @@ export type IncidentStatus =
   | "false_positive";
 
 export type CameraStatus = "online" | "offline" | "error" | "disabled";
-export type CameraSourceType = "rtsp" | "file" | "usb";
+export type CameraSourceType = "rtsp" | "http" | "file" | "usb";
 
 export interface Camera {
   id: string;

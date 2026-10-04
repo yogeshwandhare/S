@@ -12,9 +12,54 @@ import {
   useModels,
   useTestCameraConnection,
   useUpdateCamera,
+  useUsbDevices,
 } from "@/hooks/useCameras";
 import { ApiError } from "@/lib/api";
 import type { CameraSourceType } from "@/types";
+
+function UsbDevicePicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const devices = useUsbDevices();
+  if (devices.data && !devices.data.discovery_available) {
+    return <input required type="number" min="0" value={value} placeholder="Device index"
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm" />;
+  }
+  return <div className="space-y-2">
+    <select required value={devices.data?.devices.some((device) => String(device.index) === value) ? value : ""}
+      onChange={(event) => onChange(event.target.value)}
+      aria-label="Connected USB camera"
+      className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm">
+      <option value="">{devices.isLoading ? "Finding cameras…" : "Select a camera by name"}</option>
+      {devices.data?.devices.map((device) => <option key={device.index} value={String(device.index)}>
+        {device.name} (device {device.index})
+      </option>)}
+    </select>
+    {devices.error && <p className="text-xs text-severity-critical">{devices.error.message}</p>}
+    {devices.data?.discovery_available && devices.data.devices.length === 0 &&
+      <p className="text-xs text-text-muted">No cameras detected. Connect your USB camera and refresh.</p>}
+    <Button type="button" variant="ghost" size="sm" disabled={devices.isFetching}
+      onClick={() => void devices.refetch()}>Refresh devices</Button>
+  </div>;
+}
+
+function ChangeUsbDevice({ cameraId }: { cameraId: string }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const update = useUpdateCamera();
+  if (!editing) return <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>Change device</Button>;
+  return <form className="space-y-2" onSubmit={(event) => {
+    event.preventDefault();
+    if (!value) return;
+    update.mutate({ id: cameraId, usb_device_index: Number(value), enabled: true }, {
+      onSuccess: () => { setEditing(false); setValue(""); },
+    });
+  }}>
+    <UsbDevicePicker value={value} onChange={setValue} />
+    {update.error && <p className="text-xs text-severity-critical">{update.error.message}</p>}
+    <Button type="submit" size="sm" disabled={!value || update.isPending}>Use camera</Button>
+    <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+  </form>;
+}
 
 function AddCameraForm({ onDone }: { onDone: () => void }) {
   const createCamera = useCreateCamera();
@@ -56,31 +101,33 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
           <label className="text-xs text-text-muted">Source type</label>
           <select
             value={sourceType}
-            onChange={(e) => setSourceType(e.target.value as CameraSourceType)}
+            onChange={(e) => { setSourceType(e.target.value as CameraSourceType); setSourceUri(""); }}
             className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm text-text outline-none focus-visible:border-cyan"
           >
             <option value="file">Video file (sample_data/)</option>
             <option value="rtsp">RTSP stream</option>
+            <option value="http">HTTP / MJPEG stream</option>
             <option value="usb">USB webcam</option>
           </select>
         </div>
         <div className="space-y-1">
           <label className="text-xs text-text-muted">
-            {sourceType === "file" ? "Filename" : sourceType === "usb" ? "Device index" : "RTSP URL"}
+            {sourceType === "file" ? "Filename" : sourceType === "usb" ? "Connected camera" : sourceType === "http" ? "Video stream URL" : "RTSP URL"}
           </label>
-          <input
+          {sourceType === "usb" ? <UsbDevicePicker value={sourceUri} onChange={setSourceUri} /> : <input
             required
             value={sourceUri}
             onChange={(e) => setSourceUri(e.target.value)}
             placeholder={
               sourceType === "file"
                 ? "synthetic_pipeline_test.mp4"
-                : sourceType === "usb"
-                  ? "0"
-                  : "rtsp://192.168.1.50:554/stream1"
+                : sourceType === "http" ? "http://192.168.1.19:8080/video" : "rtsp://192.168.1.50:554/stream1"
             }
             className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm text-text outline-none focus-visible:border-cyan"
-          />
+          />}
+          {sourceType === "http" && <p className="text-xs text-text-muted">
+            Use the direct video URL, not the camera's control page. For IP Webcam, append /video.
+          </p>}
         </div>
       </div>
       {error && <p className="text-sm text-severity-critical">{error}</p>}
@@ -202,6 +249,7 @@ export function CamerasPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {camera.source_type === "usb" && <ChangeUsbDevice cameraId={camera.id} />}
                     <TestConnectionButton cameraId={camera.id} />
                     <label className="flex items-center gap-1.5 text-xs text-text-muted">
                       <input

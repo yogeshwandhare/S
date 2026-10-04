@@ -32,7 +32,11 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+project_root = Path(__file__).resolve().parent.parent
+backend_root = project_root / "backend"
+if not (backend_root / "app").is_dir():
+    backend_root = project_root  # Docker places the backend directly in /app.
+sys.path.insert(0, str(backend_root))
 
 import os  # noqa: E402
 

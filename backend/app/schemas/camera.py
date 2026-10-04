@@ -39,12 +39,16 @@ def validate_camera_source_uri(source_type: CameraSourceType, uri: str) -> str:
             raise ValueError("File source must be a relative filename, not an absolute path")
         return uri
 
-    if source_type == CameraSourceType.RTSP:
+    if source_type in (CameraSourceType.RTSP, CameraSourceType.HTTP):
+        uri = uri.strip()
         parsed = urlparse(uri)
-        if parsed.scheme not in ("rtsp", "rtsps"):
-            raise ValueError("RTSP source must use the rtsp:// or rtsps:// scheme")
+        schemes = ("http", "https") if source_type == CameraSourceType.HTTP else ("rtsp", "rtsps")
+        if parsed.scheme not in schemes:
+            if source_type == CameraSourceType.RTSP and parsed.scheme in ("http", "https"):
+                raise ValueError("For this URL, select HTTP / MJPEG stream instead of RTSP stream")
+            raise ValueError(f"{source_type.value.upper()} source must use {' or '.join(schemes)}://")
         if not parsed.hostname:
-            raise ValueError("RTSP source must include a host")
+            raise ValueError("Camera URL must include a host")
         try:
             ip = ipaddress.ip_address(parsed.hostname)
         except ValueError:
@@ -52,7 +56,7 @@ def validate_camera_source_uri(source_type: CameraSourceType, uri: str) -> str:
         if ip is not None:
             for network in _BLOCKED_IP_NETWORKS:
                 if ip in network:
-                    raise ValueError(f"RTSP host {parsed.hostname} is in a blocked network range")
+                    raise ValueError(f"Camera host {parsed.hostname} is in a blocked network range")
         return uri
 
     raise ValueError(f"Unsupported source type: {source_type}")
@@ -76,6 +80,7 @@ class CameraCreate(BaseModel):
 
 
 class CameraUpdate(BaseModel):
+    usb_device_index: int | None = Field(default=None, ge=0)
     name: str | None = Field(default=None, min_length=1, max_length=255)
     enabled: bool | None = None
     inference_fps: float | None = Field(default=None, ge=0.5, le=30.0)
@@ -110,3 +115,13 @@ class CameraHealthRead(BaseModel):
     measured_inference_fps: float
     consecutive_reconnect_attempts: int
     active_track_count: int
+
+
+class UsbDeviceInfo(BaseModel):
+    index: int = Field(ge=0)
+    name: str = Field(min_length=1, max_length=255)
+
+
+class UsbDevicesRead(BaseModel):
+    discovery_available: bool
+    devices: list[UsbDeviceInfo]

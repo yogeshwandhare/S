@@ -22,8 +22,8 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
@@ -31,7 +31,7 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-smartvision}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-smartvision}
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env -- generate with: python -c "import secrets; print(secrets.token_urlsafe(64))"}
+      SECRET_KEY: '${SECRET_KEY:?Set SECRET_KEY in .env -- generate with: python -c "import secrets; print(secrets.token_urlsafe(64))"}'
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       ALLOW_DEV_BOOTSTRAP: ${ALLOW_DEV_BOOTSTRAP:-false}
       SMTP_HOST: ${SMTP_HOST:-}
@@ -41,10 +41,12 @@ services:
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       INFERENCE_DEVICE: ${INFERENCE_DEVICE:-auto}
+      USB_CAMERA_BRIDGE_URL: ${USB_CAMERA_BRIDGE_URL:-}
       EVIDENCE_STORAGE_DIR: /data/evidence
     volumes:
       - evidence_storage:/data/evidence
       - ./sample_data:/data/sample_data:ro
+      - ./models/rfdetr:/root/.roboflow/models
     ports:
       # Direct backend access for API docs / debugging. Caddy also proxies
       # /api/* on :8080 for the frontend's same-origin requests.

@@ -5,6 +5,19 @@ import type { Camera, CameraHealth, CameraSourceType, ModelConfigInfo } from "@/
 
 const CAMERAS_KEY = ["cameras"] as const;
 
+export function useUsbDevices(enabled = true) {
+  return useQuery({
+    queryKey: ["usb-devices"],
+    queryFn: () => api.get<{
+      discovery_available: boolean;
+      devices: { index: number; name: string }[];
+    }>("/api/cameras/usb-devices"),
+    enabled,
+    refetchInterval: enabled ? 5_000 : false,
+    retry: false,
+  });
+}
+
 export function useCameras() {
   return useQuery<Camera[]>({
     queryKey: CAMERAS_KEY,
@@ -47,7 +60,7 @@ export function useCreateCamera() {
 export function useUpdateCamera() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...changes }: { id: string; enabled?: boolean }) =>
+    mutationFn: ({ id, ...changes }: { id: string; enabled?: boolean; usb_device_index?: number }) =>
       api.patch<Camera>(`/api/cameras/${id}`, changes),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CAMERAS_KEY }),
   });

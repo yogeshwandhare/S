@@ -35,7 +35,10 @@ def main() -> int:
         return 1
 
     model = YOLO(str(args.checkpoint))
-    onnx_path = model.export(format="onnx", imgsz=args.imgsz, simplify=True)
+    onnx_path = model.export(
+        format="onnx", imgsz=args.imgsz, simplify=False, opset=17,
+        dynamic=False, nms=False, batch=1,
+    )
     print(f"\nExported ONNX model: {onnx_path}")
     return 0
 

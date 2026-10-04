@@ -25,6 +25,7 @@ class CameraStatus(enum.StrEnum):
 
 class CameraSourceType(enum.StrEnum):
     RTSP = "rtsp"
+    HTTP = "http"
     FILE = "file"
     USB = "usb"
 

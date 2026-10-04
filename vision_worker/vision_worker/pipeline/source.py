@@ -14,6 +14,7 @@ needing a running asyncio event loop.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class SourceType(StrEnum):
     RTSP = "rtsp"
+    HTTP = "http"
     FILE = "file"
     USB = "usb"
 
@@ -63,11 +65,17 @@ class FrameSource:
 
     def open(self) -> None:
         uri = self._resolve_uri()
-        capture_backend = (
-            cv2.CAP_FFMPEG if self.config.source_type != SourceType.USB else cv2.CAP_ANY
-        )
+        capture_backend = cv2.CAP_ANY if isinstance(uri, int) else cv2.CAP_FFMPEG
 
-        cap = cv2.VideoCapture(uri, capture_backend)
+        if self.config.source_type == SourceType.HTTP or (
+            self.config.source_type == SourceType.USB and isinstance(uri, str)
+        ):
+            cap = cv2.VideoCapture(
+                uri, capture_backend,
+                [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000],
+            )
+        else:
+            cap = cv2.VideoCapture(uri, capture_backend)
         if not cap.isOpened():
             cap.release()
             self.last_error = f"Could not open source: {self._safe_uri_for_logging()}"
@@ -79,17 +87,19 @@ class FrameSource:
     def _resolve_uri(self) -> str | int:
         if self.config.source_type == SourceType.USB:
             try:
-                return int(self.config.uri)
+                index = int(self.config.uri)
             except ValueError as exc:
                 raise CameraConnectionError(
                     f"USB source URI must be a device index, got {self.config.uri!r}"
                 ) from exc
+            bridge = os.environ.get("USB_CAMERA_BRIDGE_URL", "").strip()
+            if bridge:
+                return f"{bridge.rstrip('/')}/{index}.mjpg"
+            return index
 
         if self.config.source_type == SourceType.RTSP and self.config.force_tcp:
             # OpenCV/FFmpeg reads RTSP transport preference from this
             # environment variable at capture-open time.
-            import os
-
             os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
 
         return self.config.uri

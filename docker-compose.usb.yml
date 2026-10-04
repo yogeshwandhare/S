@@ -1,0 +1,15 @@
+# Local Windows webcam support using an already-built backend image.
+# Build frontend/dist with npm --prefix frontend run build first.
+# Local sources are mounted to avoid reinstalling AI dependencies.
+# docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --no-build --no-deps backend web
+services:
+  backend:
+    volumes:
+      - ./vision_worker/vision_worker/pipeline/source.py:/vision_worker/vision_worker/pipeline/source.py:ro
+      - ./backend/app/api/cameras.py:/app/app/api/cameras.py:ro
+      - ./backend/app/schemas/camera.py:/app/app/schemas/camera.py:ro
+      - ./backend/app/models/enums.py:/app/app/models/enums.py:ro
+      - ./backend/app/services/camera_manager.py:/app/app/services/camera_manager.py:ro
+  web:
+    volumes:
+      - ./frontend/dist:/srv:ro

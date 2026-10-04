@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import time
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -14,7 +16,14 @@ from app.models.audit_log import AuditLog
 from app.models.camera import Camera
 from app.models.enums import CameraStatus
 from app.models.user import User
-from app.schemas.camera import CameraCreate, CameraHealthRead, CameraRead, CameraUpdate
+from app.schemas.camera import (
+    CameraCreate,
+    CameraHealthRead,
+    CameraRead,
+    CameraUpdate,
+    UsbDeviceInfo,
+    UsbDevicesRead,
+)
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 
@@ -98,6 +107,26 @@ def create_camera(
     return _apply_live_status(camera, request)
 
 
+@router.get("/usb-devices", response_model=UsbDevicesRead)
+def list_usb_devices(_user: User = Depends(require_operator_or_admin)) -> UsbDevicesRead:
+    bridge = os.environ.get("USB_CAMERA_BRIDGE_URL", "").strip()
+    if not bridge:
+        return UsbDevicesRead(discovery_available=False, devices=[])
+    try:
+        response = httpx.get(f"{bridge.rstrip('/')}/devices", timeout=4, trust_env=False)
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, list):
+            raise ValueError("Invalid device list")
+        devices = [UsbDeviceInfo.model_validate(device) for device in data]
+        return UsbDevicesRead(discovery_available=True, devices=devices)
+    except (httpx.HTTPError, ValueError, TypeError):
+        raise HTTPException(
+            status_code=503,
+            detail="Camera discovery is unavailable. Start the Windows camera bridge and retry.",
+        ) from None
+
+
 @router.get("/{camera_id}", response_model=CameraRead)
 def get_camera(
     camera_id: uuid.UUID,
@@ -119,6 +148,11 @@ def update_camera(
 ) -> Camera:
     camera = _get_camera_or_404(db, camera_id)
     changes = payload.model_dump(exclude_unset=True)
+    device_index = changes.pop("usb_device_index", None)
+    if device_index is not None:
+        if camera.source_type.value != "usb":
+            raise HTTPException(status_code=422, detail="Device selection is only for USB cameras")
+        changes["source_uri"] = str(device_index)
     for field, value in changes.items():
         setattr(camera, field, value)
 

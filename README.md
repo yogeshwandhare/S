@@ -123,6 +123,79 @@ Then restart the backend so running camera workers pick up the change:
 the dashboard — a video-file source pointing at a file under `sample_data/`
 works without any real camera hardware.
 
+### Windows USB webcam with Docker Desktop
+
+Run the camera bridge on Windows so the Linux backend can read your webcam.
+It uses a private token and listens on localhost. One bridge discovers all
+Windows cameras by name and opens only cameras selected in SmartVision.
+
+From the repository root in PowerShell (Python 3.12 or newer):
+
+```powershell
+# Only needed if your Windows Python does not already have OpenCV:
+py -3 -m pip install opencv-python-headless
+py -3 -m pip install --target .usb-camera/packages -r scripts/usb_camera_requirements.txt
+
+py -3 scripts/usb_camera_bridge.py --configure-docker
+```
+
+Leave that terminal running. The bridge updates only `USB_CAMERA_BRIDGE_URL`
+in the root `.env`; its token is stored in the gitignored `.usb-camera/` directory.
+If your existing backend already downloaded detector weights, preserve
+them before recreating the container (skip this on a fresh installation):
+
+```powershell
+New-Item -ItemType Directory -Force models/rfdetr | Out-Null
+docker compose cp backend:/root/.roboflow/models/. ./models/rfdetr
+```
+
+In another terminal, apply the backend setting and adapter to your existing
+backend image without rebuilding the AI dependencies, and build the device picker:
+
+```powershell
+npm --prefix frontend install
+npm --prefix frontend run build
+docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --no-build --no-deps backend web
+```
+
+Open **Cameras → Add camera → USB webcam** and select the actual device
+name. To switch an existing USB entry, use **Change device → Use camera**.
+The list refreshes every five seconds while the picker is open; **Refresh
+devices** scans immediately. Then open **Live Monitoring**.
+
+Newly connected cameras appear without restarting the bridge. The bridge
+remembers device identities in `.usb-camera/devices.json`, so unplugging
+a selected camera does not silently switch to the laptop camera when
+Windows renumbers devices. Reconnecting the same device lets the backend
+retry automatically. Moving it to a different USB port may require selecting
+it again if Windows assigns a new device path.
+
+To list devices without opening them: `py -3 scripts/usb_camera_bridge.py --list`.
+Windows must recognize a compatible camera driver; the bridge cannot make
+an undetected or disconnected device available.
+On Windows it tries Media Foundation first (including DroidCam), then
+DirectShow for the same device if needed. For a DroidCam phone, connect
+the phone in the DroidCam Windows client first, then select **DroidCam Video**.
+Close other camera apps and enable Windows camera access for desktop apps
+if the bridge cannot open the device. After restarting Windows, run the
+bridge command again. Ctrl+C stops webcam sharing.
+
+Use the same two Compose files for subsequent `up` commands while using
+this local override. It mounts the camera API/adapter and the built frontend.
+After full backend and frontend image builds, the override is unnecessary.
+
+Leave `USB_CAMERA_BRIDGE_URL` unset for a backend that opens a USB device
+directly. Docker detector weights now persist under `models/rfdetr/`.
+
+### Phone cameras using HTTP / MJPEG
+
+For the Android IP Webcam app, choose **HTTP / MJPEG stream** in **Cameras**
+and enter the direct video URL, for example `http://192.168.1.19:8080/video`.
+The address without `/video` is the camera's web-control page, not its video.
+Keep the phone's camera server running and reachable from the backend.
+Use **RTSP stream** only for URLs beginning with `rtsp://` or `rtsps://`.
+Paste the plain URL, without Markdown link brackets.
+
 ### Enable email notifications (optional)
 
 Without SMTP configured, incidents still create in-app notifications and
@@ -178,6 +251,24 @@ The dataset itself comes from `github.com/ari-dasci/OD-WeaponDetection`
 
 To stop: `docker compose down` (add `-v` to also delete the Postgres
 volume and evidence storage).
+
+### Faster backend rebuilds
+
+After backend code changes, rebuild only that service:
+
+```bash
+docker compose up -d --build --no-deps backend
+```
+
+The backend Dockerfile caches system packages and third-party Python/AI
+dependencies separately from application code. Dependency installation is
+repeated when dependency manifests or the lockfile change; a BuildKit cache
+also retains downloaded packages. The first build with this layout populates
+the cache. Avoid `--no-cache` and build-cache pruning when you want fast rebuilds.
+
+If no code changed, start existing images with `docker compose up -d --no-build`,
+or restart an already-created backend with `docker compose restart backend`.
+Restarting alone does not include code changes in the image.
 
 ## Non-Docker development setup
 

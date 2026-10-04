@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { Navigate, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { onSessionExpired } from "@/lib/api";
 import { AnalyticsPage } from "@/pages/Analytics";
 import { CamerasPage } from "@/pages/Cameras";
 import { IncidentsPage } from "@/pages/Incidents";
@@ -59,6 +61,11 @@ function AppRoutes() {
 }
 
 export default function App() {
+  useEffect(() => onSessionExpired(() => {
+    queryClient.setQueryData(["auth", "me"], null);
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "auth" });
+  }), []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <Router>

@@ -18,15 +18,25 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1
 
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev
+# Build from the repo root so the local ../vision_worker dependency is available.
+COPY backend/pyproject.toml backend/uv.lock ./
+COPY vision_worker/pyproject.toml /vision_worker/pyproject.toml
+# Keep the large third-party dependencies cached when application code changes.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project \
+        --no-install-package smartvision-vision-worker --no-dev --extra rfdetr
 
-COPY . .
-RUN uv sync --frozen --no-dev
+COPY vision_worker/ /vision_worker/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra rfdetr
+
+COPY backend/ .
+COPY scripts/create_admin.py ./scripts/create_admin.py
+COPY scripts/download_models.py ./scripts/download_models.py
 
 ENV PATH="/app/.venv/bin:${PATH}"
 
-RUN chmod +x docker-entrypoint.sh
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 
 EXPOSE 8000
 

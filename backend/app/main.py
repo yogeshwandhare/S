@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -50,33 +51,51 @@ async def lifespan(app: FastAPI):
         manager.stop_all()
         return
 
-    with SessionLocal() as db:
-        try:
-            detector = get_active_object_detector(db)
-            manager.set_detector(detector)
-            manager.set_weapon_detector(get_active_weapon_detector(db))
-            manager.set_incident_callback(handle_rule_trigger)
-            if detector is None:
-                logger.info(
-                    "Starting with no object detector configured -- camera feeds will "
-                    "show raw (unannotated) video until one is enabled in the model "
-                    "registry. See scripts/download_models.py."
-                )
-            enabled_cameras = list(db.scalars(select(Camera).where(Camera.enabled.is_(True))))
-            for camera in enabled_cameras:
-                try:
-                    manager.start_camera(camera, db)
-                except Exception:
-                    logger.exception("Failed to start camera %s on startup", camera.id)
-        except Exception:
-            # A broken model/camera table must never prevent the API itself
-            # (auth, health, etc.) from starting.
-            logger.exception("Camera manager startup encountered an error")
+    initialization_stopped = threading.Event()
+
+    def initialize_camera_manager() -> None:
+        # Loading ML frameworks and checkpoints can take minutes and use a
+        # large amount of memory. Do it off the ASGI startup path so API
+        # routes (especially auth and health) are available immediately.
+        with SessionLocal() as db:
+            try:
+                detector = get_active_object_detector(db)
+                if initialization_stopped.is_set():
+                    return
+                manager.set_detector(detector)
+                manager.set_weapon_detector(get_active_weapon_detector(db))
+                manager.set_incident_callback(handle_rule_trigger)
+                if detector is None:
+                    logger.info(
+                        "Starting with no object detector configured -- camera feeds will "
+                        "show raw (unannotated) video until one is enabled in the model "
+                        "registry. See scripts/download_models.py."
+                    )
+                enabled_cameras = list(db.scalars(select(Camera).where(Camera.enabled.is_(True))))
+                for camera in enabled_cameras:
+                    if initialization_stopped.is_set():
+                        break
+                    try:
+                        manager.start_camera(camera, db)
+                    except Exception:
+                        logger.exception("Failed to start camera %s on startup", camera.id)
+            except Exception:
+                # A broken model/camera table must never prevent the API itself
+                # (auth, health, etc.) from starting.
+                logger.exception("Camera manager startup encountered an error")
+
+    initialization_thread = threading.Thread(
+        target=initialize_camera_manager,
+        name="camera-manager-startup",
+        daemon=True,
+    )
+    initialization_thread.start()
 
     notification_task = asyncio.create_task(notification_worker_loop(SessionLocal))
 
     yield
 
+    initialization_stopped.set()
     notification_task.cancel()
     manager.stop_all()
 

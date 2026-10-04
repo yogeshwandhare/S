@@ -162,3 +162,90 @@ def test_models_registry_endpoint_returns_list(admin_client):
     resp = admin_client.get("/api/models")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_http_camera_source_and_credentials_remain_private(admin_client, monkeypatch):
+    monkeypatch.setattr(admin_client.app.state.camera_manager, "start_camera", lambda *args: None)
+    response = admin_client.post("/api/cameras", json={
+        "name": "Phone", "source_type": "http",
+        "source_uri": "http://user:secret@192.168.1.19:8080/video",
+    })
+    assert response.status_code == 201
+    assert response.json()["source_type"] == "http"
+    assert "source_uri" not in response.json()
+    assert "secret" not in response.text
+
+
+def test_http_camera_rejects_other_protocols_and_metadata(admin_client):
+    for uri in ["file:///etc/passwd", "rtsp://camera/live", "http://169.254.169.254/video"]:
+        response = admin_client.post("/api/cameras", json={
+            "name": "Invalid", "source_type": "http", "source_uri": uri,
+        })
+        assert response.status_code == 422
+
+
+def test_rtsp_rejects_http_with_actionable_message(admin_client):
+    response = admin_client.post("/api/cameras", json={
+        "name": "Phone", "source_type": "rtsp", "source_uri": "http://192.168.1.19:8080",
+    })
+    assert response.status_code == 422
+    assert "select HTTP / MJPEG" in response.text
+
+
+def test_usb_discovery_requires_authentication(client):
+    assert client.get("/api/cameras/usb-devices").status_code == 401
+
+
+def test_usb_discovery_without_bridge(admin_client, monkeypatch):
+    monkeypatch.delenv("USB_CAMERA_BRIDGE_URL", raising=False)
+    response = admin_client.get("/api/cameras/usb-devices")
+    assert response.status_code == 200
+    assert response.json() == {"discovery_available": False, "devices": []}
+
+
+def test_usb_discovery_returns_names_without_private_url(admin_client, monkeypatch):
+    import httpx
+    monkeypatch.setenv("USB_CAMERA_BRIDGE_URL", "http://host/private-token")
+    response = httpx.Response(200, json=[{"index": 1, "name": "External webcam"}],
+                              request=httpx.Request("GET", "http://host/private-token/devices"))
+    monkeypatch.setattr("app.api.cameras.httpx.get", lambda *a, **kw: response)
+    result = admin_client.get("/api/cameras/usb-devices")
+    assert result.status_code == 200
+    assert result.json()["devices"] == [{"index": 1, "name": "External webcam"}]
+    assert "private-token" not in result.text
+
+
+def test_usb_discovery_failure_is_actionable_and_redacted(admin_client, monkeypatch):
+    import httpx
+    monkeypatch.setenv("USB_CAMERA_BRIDGE_URL", "http://host/private-token")
+    def fail(*args, **kwargs):
+        raise httpx.ConnectError("Could not connect to http://host/private-token")
+    monkeypatch.setattr("app.api.cameras.httpx.get", fail)
+    response = admin_client.get("/api/cameras/usb-devices")
+    assert response.status_code == 503
+    assert "Start the Windows camera bridge" in response.text
+    assert "private-token" not in response.text
+
+
+def test_change_usb_device_preserves_camera_id(admin_client, db_engine):
+    from sqlalchemy.orm import Session
+    from app.models.camera import Camera
+    import uuid
+    created = admin_client.post("/api/cameras", json={
+        "name": "External", "source_type": "usb", "source_uri": "0",
+    }).json()
+    response = admin_client.patch(f"/api/cameras/{created['id']}", json={
+        "usb_device_index": 2, "enabled": False,
+    })
+    assert response.status_code == 200
+    assert response.json()["id"] == created["id"]
+    with Session(db_engine) as db:
+        assert db.get(Camera, uuid.UUID(created["id"])).source_uri == "2"
+
+
+def test_change_usb_device_rejects_non_usb_camera(admin_client):
+    created = admin_client.post("/api/cameras", json={
+        "name": "File", "source_type": "file", "source_uri": "test.mp4",
+    }).json()
+    response = admin_client.patch(f"/api/cameras/{created['id']}", json={"usb_device_index": 1})
+    assert response.status_code == 422

@@ -36,6 +36,11 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--workers", type=int, default=0)
+    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--resume", type=Path, help="Resume an interrupted last.pt checkpoint")
     parser.add_argument(
         "--base-checkpoint",
         default="yolo11n.pt",
@@ -61,8 +66,11 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    import torch
+
+    torch.set_num_threads(args.threads)
     print(f"Fine-tuning {args.base_checkpoint} on {args.dataset} for {args.epochs} epochs...")
-    model = YOLO(args.base_checkpoint)
+    model = YOLO(str(args.resume) if args.resume else args.base_checkpoint)
     results = model.train(
         data=str(args.dataset.resolve()),
         epochs=args.epochs,
@@ -71,7 +79,13 @@ def main() -> int:
         project=str(args.output_dir),
         name="train",
         exist_ok=True,
-        device="cpu",
+        device=args.device,
+        workers=args.workers,
+        patience=args.patience,
+        resume=bool(args.resume),
+        seed=42,
+        cache=False,
+        amp=False,
         verbose=True,
     )
 
@@ -83,6 +97,10 @@ def main() -> int:
         "epochs": args.epochs,
         "dataset": str(args.dataset.resolve()),
         "best_checkpoint": str(best_checkpoint),
+        "device": args.device,
+        "imgsz": args.imgsz,
+        "batch": args.batch,
+        "seed": 42,
     }
     metadata_path = args.output_dir / "training_metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2))
