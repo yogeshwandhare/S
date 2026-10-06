@@ -73,7 +73,12 @@ export function useUploadCameraVideo() {
 export function useUpdateCamera() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...changes }: { id: string; enabled?: boolean; usb_device_index?: number }) =>
+    mutationFn: ({ id, ...changes }: {
+      id: string;
+      enabled?: boolean;
+      usb_device_index?: number;
+      inference_fps?: number;
+    }) =>
       api.patch<Camera>(`/api/cameras/${id}`, changes),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CAMERAS_KEY }),
   });

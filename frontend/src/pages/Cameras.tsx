@@ -70,6 +70,7 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const [sourceType, setSourceType] = useState<CameraSourceType>("file");
   const [sourceUri, setSourceUri] = useState("");
+  const [inferenceFps, setInferenceFps] = useState(10);
   const [manualFileEntry, setManualFileEntry] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +79,7 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
     e.preventDefault();
     setError(null);
     createCamera.mutate(
-      { name, source_type: sourceType, source_uri: sourceUri },
+      { name, source_type: sourceType, source_uri: sourceUri, inference_fps: inferenceFps },
       {
         onSuccess: () => {
           setName("");
@@ -93,7 +94,7 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 border-t border-border p-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="space-y-1">
           <label className="text-xs text-text-muted">Name</label>
           <input
@@ -218,6 +219,18 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
             Use the direct video URL, not the camera's control page. For IP Webcam, append /video.
           </p>}
         </div>
+        <div className="space-y-1">
+          <label className="text-xs text-text-muted" htmlFor="new-camera-inference-fps">Detection FPS</label>
+          <select
+            id="new-camera-inference-fps"
+            value={inferenceFps}
+            onChange={(e) => setInferenceFps(Number(e.target.value))}
+            className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm text-text outline-none"
+          >
+            {[5, 10, 15, 20, 25, 30].map((fps) => <option key={fps} value={fps}>{fps} FPS</option>)}
+          </select>
+          <p className="text-xs text-text-muted">Higher rates need more processing power.</p>
+        </div>
       </div>
       {error && <p className="text-sm text-severity-critical">{error}</p>}
       <div className="flex justify-end gap-2">
@@ -338,6 +351,20 @@ export function CamerasPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-xs text-text-muted">
+                      Detection FPS
+                      <select
+                        aria-label={`Detection FPS for ${camera.name}`}
+                        value={camera.inference_fps}
+                        onChange={(e) => updateCamera.mutate({ id: camera.id, inference_fps: Number(e.target.value) })}
+                        className="rounded-md border border-border-strong bg-surface-raised px-2 py-1 text-text outline-none"
+                      >
+                        {![5, 10, 15, 20, 25, 30].includes(camera.inference_fps) && (
+                          <option value={camera.inference_fps}>{camera.inference_fps} FPS</option>
+                        )}
+                        {[5, 10, 15, 20, 25, 30].map((fps) => <option key={fps} value={fps}>{fps} FPS</option>)}
+                      </select>
+                    </label>
                     {camera.source_type === "usb" && <ChangeUsbDevice cameraId={camera.id} />}
                     <TestConnectionButton cameraId={camera.id} />
                     <label className="flex items-center gap-1.5 text-xs text-text-muted">
