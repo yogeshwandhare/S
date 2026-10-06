@@ -26,7 +26,12 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.camera import Camera
 from app.services.camera_manager import CameraManager
-from app.services.detector_factory import get_active_object_detector, get_active_weapon_detector
+from app.services.detector_factory import (
+    get_active_object_detector,
+    get_active_violence_classifier,
+    get_active_abandoned_object_classifier,
+    get_active_weapon_detector,
+)
 from app.services.incident_service import handle_rule_trigger
 from app.services.notification_service import notification_worker_loop
 
@@ -64,6 +69,10 @@ async def lifespan(app: FastAPI):
                     return
                 manager.set_detector(detector)
                 manager.set_weapon_detector(get_active_weapon_detector(db))
+                manager.set_violence_classifier(get_active_violence_classifier(db))
+                manager.set_abandoned_object_classifier(
+                    get_active_abandoned_object_classifier(db)
+                )
                 manager.set_incident_callback(handle_rule_trigger)
                 if detector is None:
                     logger.info(

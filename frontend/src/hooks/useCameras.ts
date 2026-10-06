@@ -57,6 +57,19 @@ export function useCreateCamera() {
   });
 }
 
+export function useUploadCameraVideo() {
+  return useMutation({
+    mutationFn: (video: File) => {
+      const form = new FormData();
+      form.append("video", video);
+      return api.upload<{ source_uri: string; original_filename: string }>(
+        "/api/cameras/upload-video",
+        form,
+      );
+    },
+  });
+}
+
 export function useUpdateCamera() {
   const queryClient = useQueryClient();
   return useMutation({

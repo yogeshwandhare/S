@@ -36,12 +36,17 @@ models/*.pth
 *.pt
 *.pth
 *.onnx
+# Hugging Face/OpenCLIP runtime cache (large blobs and symlinks).
+/models/clip/*
+!/models/clip/.gitkeep
 
 # Ultralytics' default working-directory dump for training/validation runs
 # (confusion matrices, PR curves, sample predictions). A curated copy of
 # one real evaluation run is committed under docs/weapon_detector_validation/
 # instead -- see that directory's README.
 /runs/
+/Weapons-and-Knives-Detector-with-YOLOv8/
+/Abandoned-Object-Detection/
 
 # OS / editor
 .DS_Store

@@ -54,11 +54,12 @@ async function request<T>(
   options: RequestInit = {},
   allowRefresh = true,
 ): Promise<T> {
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      ...(!isFormData ? { "Content-Type": "application/json" } : {}),
       ...options.headers,
     },
   });
@@ -101,6 +102,8 @@ export const api = {
       method: "POST",
       body: data !== undefined ? JSON.stringify(data) : undefined,
     }),
+  upload: <T>(path: string, data: FormData) =>
+    request<T>(path, { method: "POST", body: data }),
   patch: <T>(path: string, data?: unknown) =>
     request<T>(path, {
       method: "PATCH",

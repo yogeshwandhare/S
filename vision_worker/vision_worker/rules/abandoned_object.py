@@ -13,8 +13,15 @@ incident service, which always surfaces it for human review.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
+import numpy as np
+
+from vision_worker.detectors.abandoned_object_classifier import (
+    AbandonedObjectClassification,
+    YoloAbandonedObjectClassifier,
+)
 from vision_worker.rules.geometry import euclidean_distance
 from vision_worker.types import Track
 
@@ -23,6 +30,7 @@ from vision_worker.types import Track
 #: doesn't support these classes, this rule simply never fires for it,
 #: rather than assuming they exist.
 LUGGAGE_CLASSES = frozenset({"backpack", "handbag", "suitcase"})
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -41,6 +49,8 @@ class AbandonedObjectEvent:
     track_id: int
     class_name: str
     stationary_seconds: float
+    classifier_label: str | None = None
+    classifier_confidence: float | None = None
 
 
 @dataclass
@@ -49,6 +59,7 @@ class _ObjectState:
     anchor_time: float
     last_triggered_at: float | None = None
     triggered_for_current_stationary_period: bool = False
+    last_classified_at: float | None = None
 
 
 class AbandonedObjectRule:
@@ -59,7 +70,14 @@ class AbandonedObjectRule:
         self.config = config or AbandonedObjectConfig()
         self._object_state: dict[int, _ObjectState] = {}
 
-    def evaluate(self, tracks: list[Track], now: float) -> list[AbandonedObjectEvent]:
+    def evaluate(
+        self,
+        tracks: list[Track],
+        now: float,
+        frame_bgr: np.ndarray | None = None,
+        classifier: YoloAbandonedObjectClassifier | None = None,
+        confidence_threshold: float = 0.5,
+    ) -> list[AbandonedObjectEvent]:
         people = [t for t in tracks if t.class_name == "person"]
         objects = [t for t in tracks if t.class_name in LUGGAGE_CLASSES]
 
@@ -105,6 +123,36 @@ class AbandonedObjectRule:
             if nearest_person_distance <= self.config.owner_proximity_px:
                 continue  # a plausible owner is still nearby -- not abandoned
 
+            classification: AbandonedObjectClassification | None = None
+            if classifier is not None:
+                if frame_bgr is None:
+                    continue
+                if (
+                    state.last_classified_at is not None
+                    and now - state.last_classified_at < 5.0
+                ):
+                    continue
+
+                state.last_classified_at = now
+                x1 = max(0, int(obj.box.x1))
+                y1 = max(0, int(obj.box.y1))
+                x2 = min(frame_bgr.shape[1], int(obj.box.x2))
+                y2 = min(frame_bgr.shape[0], int(obj.box.y2))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                try:
+                    classification = classifier.classify(frame_bgr[y1:y2, x1:x2])
+                except Exception:
+                    # A classifier error must not turn a candidate into a
+                    # positive alert; retry on the next classification interval.
+                    logger.exception("Abandoned-object classifier failed")
+                    continue
+                if (
+                    not classification.is_luggage
+                    or classification.confidence < confidence_threshold
+                ):
+                    continue
+
             state.triggered_for_current_stationary_period = True
             state.last_triggered_at = now
             events.append(
@@ -112,6 +160,10 @@ class AbandonedObjectRule:
                     track_id=obj.track_id,
                     class_name=obj.class_name,
                     stationary_seconds=stationary_for,
+                    classifier_label=classification.label if classification else None,
+                    classifier_confidence=(
+                        classification.confidence if classification else None
+                    ),
                 )
             )
 

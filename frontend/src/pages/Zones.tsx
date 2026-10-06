@@ -51,7 +51,9 @@ export function ZonesPage() {
     );
   }
 
-  const polygonPointsAttr = points.map(([x, y]) => `${x * 100}%,${y * 100}%`).join(" ");
+  // Use an explicit SVG coordinate system: the `points` attribute expects
+  // numeric coordinates, while CSS percentage strings are unreliable here.
+  const polygonPointsAttr = points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(" ");
 
   return (
     <div className="flex flex-1 flex-col">
@@ -94,17 +96,33 @@ export function ZonesPage() {
                   onClick={handleImageClick}
                   className="w-full cursor-crosshair select-none"
                 />
-                <svg className="pointer-events-none absolute inset-0 h-full w-full">
-                  {points.length > 0 && (
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 1000 1000"
+                  preserveAspectRatio="none"
+                  className="pointer-events-none absolute inset-0 h-full w-full"
+                >
+                  {points.length >= 3 && (
                     <polygon
                       points={polygonPointsAttr}
                       fill="rgba(45, 212, 191, 0.2)"
                       stroke="#2dd4bf"
-                      strokeWidth={2}
+                      strokeWidth={4}
+                      strokeLinejoin="round"
+                    />
+                  )}
+                  {points.length === 2 && (
+                    <polyline
+                      points={polygonPointsAttr}
+                      fill="none"
+                      stroke="#2dd4bf"
+                      strokeWidth={4}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
                     />
                   )}
                   {points.map(([x, y], i) => (
-                    <circle key={i} cx={`${x * 100}%`} cy={`${y * 100}%`} r={4} fill="#2dd4bf" />
+                    <circle key={i} cx={x * 1000} cy={y * 1000} r={7} fill="#2dd4bf" stroke="#0f172a" strokeWidth={3} />
                   ))}
                 </svg>
               </div>

@@ -10,23 +10,26 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
 from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vision_worker.detectors.base import Detector
+from vision_worker.detectors.clip_violence_classifier import ClipViolenceClassifier
+from vision_worker.detectors.abandoned_object_classifier import YoloAbandonedObjectClassifier
 from vision_worker.pipeline.source import FrameSource, FrameSourceConfig, SourceType
 from vision_worker.pipeline.worker import CameraHealth, CameraWorker
 from vision_worker.rules.abandoned_object import AbandonedObjectRule
 from vision_worker.rules.aggressive_motion import AggressiveMotionRule
 from vision_worker.rules.intrusion import ZoneConfig, ZoneIntrusionRule
 from vision_worker.rules.weapon_confirmation import WeaponConfirmationRule
+from vision_worker.rules.violence_confirmation import ViolenceConfirmationRule
 
 from app.core.config import get_settings
 from app.models.camera import Camera, Zone
 from app.models.enums import CameraSourceType
+from app.services.video_storage import resolve_video_source
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -37,11 +40,6 @@ _SOURCE_TYPE_MAP = {
     CameraSourceType.FILE: SourceType.FILE,
     CameraSourceType.USB: SourceType.USB,
 }
-
-_SAMPLE_DATA_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "sample_data")
-)
-
 
 def _load_zone_rules(db: Session, camera_id: uuid.UUID) -> list[ZoneIntrusionRule]:
     zones = list(
@@ -67,6 +65,8 @@ class CameraManager:
         self._workers: dict[str, CameraWorker] = {}
         self._detector: Detector | None = None
         self._weapon_detector: Detector | None = None
+        self._violence_classifier: ClipViolenceClassifier | None = None
+        self._abandoned_object_classifier: YoloAbandonedObjectClassifier | None = None
         self._on_rule_triggered: Callable[..., None] | None = None
 
     def set_detector(self, detector: Detector | None) -> None:
@@ -81,6 +81,15 @@ class CameraManager:
         pass. None (the common case, since no weapon checkpoint ships
         enabled by default) means weapon detection is simply skipped."""
         self._weapon_detector = detector
+
+    def set_violence_classifier(self, classifier: ClipViolenceClassifier | None) -> None:
+        """Set the shared frame classifier used for human-reviewed violence alerts."""
+        self._violence_classifier = classifier
+
+    def set_abandoned_object_classifier(
+        self, classifier: YoloAbandonedObjectClassifier | None
+    ) -> None:
+        self._abandoned_object_classifier = classifier
 
     def set_incident_callback(self, callback: Callable[..., None] | None) -> None:
         """Wires up what happens when a rule fires -- normally
@@ -101,7 +110,7 @@ class CameraManager:
 
         uri = camera.source_uri
         if camera.source_type == CameraSourceType.FILE:
-            uri = os.path.normpath(os.path.join(_SAMPLE_DATA_DIR, uri))
+            uri = resolve_video_source(uri)
 
         source = FrameSource(
             FrameSourceConfig(
@@ -116,10 +125,15 @@ class CameraManager:
             inference_fps=camera.inference_fps,
             zone_rules=_load_zone_rules(db, camera.id),
             abandoned_object_rule=AbandonedObjectRule(),
+            abandoned_object_classifier=self._abandoned_object_classifier,
             aggressive_motion_rule=AggressiveMotionRule(),
             weapon_detector=self._weapon_detector,
             weapon_confirmation_rule=(
                 WeaponConfirmationRule() if self._weapon_detector is not None else None
+            ),
+            violence_classifier=self._violence_classifier,
+            violence_confirmation_rule=(
+                ViolenceConfirmationRule() if self._violence_classifier is not None else None
             ),
             on_rule_triggered=self._on_rule_triggered,
         )

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import os
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.deps import require_admin
 from app.models.audit_log import AuditLog
@@ -16,9 +17,7 @@ from app.schemas.camera import CameraRead
 
 router = APIRouter(prefix="/api/demo", tags=["demo"])
 
-_SAMPLE_DATA_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "sample_data")
-)
+_SAMPLE_DATA_DIR = Path(get_settings().SAMPLE_DATA_DIR).resolve()
 
 _KNOWN_CLIPS = {
     "synthetic_pipeline_test.mp4": (
@@ -43,11 +42,12 @@ class DemoLaunchRequest(BaseModel):
 def list_sample_videos(_user: User = Depends(require_admin)) -> list[SampleVideo]:
     """Only .mp4 files actually present on disk are ever listed -- never a
     hardcoded catalog that might not match what's really there."""
-    if not os.path.isdir(_SAMPLE_DATA_DIR):
+    if not _SAMPLE_DATA_DIR.is_dir():
         return []
     videos = []
-    for filename in sorted(os.listdir(_SAMPLE_DATA_DIR)):
-        if filename.endswith(".mp4"):
+    for sample_path in sorted(_SAMPLE_DATA_DIR.iterdir()):
+        if sample_path.is_file() and sample_path.suffix.lower() == ".mp4":
+            filename = sample_path.name
             videos.append(
                 SampleVideo(
                     filename=filename,
@@ -70,11 +70,11 @@ def launch_demo(
     in its notes field -- this is the only thing that distinguishes it from
     an ordinary file-source camera, since under the hood it's exactly that.
     """
-    if ".." in payload.filename or "/" in payload.filename or "\\" in payload.filename:
+    if Path(payload.filename).name != payload.filename:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sample video not found")
 
-    video_path = os.path.join(_SAMPLE_DATA_DIR, payload.filename)
-    if not os.path.isfile(video_path) or not payload.filename.endswith(".mp4"):
+    video_path = _SAMPLE_DATA_DIR / payload.filename
+    if not video_path.is_file() or video_path.suffix.lower() != ".mp4":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sample video not found")
 
     camera = Camera(

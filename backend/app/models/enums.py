@@ -34,7 +34,7 @@ class IncidentCategory(enum.StrEnum):
     INTRUSION = "intrusion"
     ABANDONED_OBJECT = "abandoned_object"
     AGGRESSIVE_MOTION = "aggressive_motion"  # heuristic-only, review required
-    FIGHT = "fight"  # only used once a validated classifier is enabled
+    FIGHT = "fight"  # possible violence from a model; human review is required
     WEAPON = "weapon"
 
 
@@ -58,6 +58,7 @@ class ModelTask(enum.StrEnum):
     POSE_ESTIMATION = "pose_estimation"
     ACTION_RECOGNITION = "action_recognition"
     WEAPON_DETECTION = "weapon_detection"
+    OBJECT_CLASSIFICATION = "object_classification"
 
 
 class NotificationChannel(enum.StrEnum):

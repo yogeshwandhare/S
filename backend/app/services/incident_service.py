@@ -40,6 +40,7 @@ _CATEGORY_MAP = {
     "intrusion": IncidentCategory.INTRUSION,
     "abandoned_object": IncidentCategory.ABANDONED_OBJECT,
     "aggressive_motion": IncidentCategory.AGGRESSIVE_MOTION,
+    "fight": IncidentCategory.FIGHT,
     "weapon": IncidentCategory.WEAPON,
 }
 
@@ -100,7 +101,8 @@ def handle_rule_trigger(event, snapshot: bytes) -> None:
             category=category,
             severity=severity,
             status=IncidentStatus.NEW,
-            model_name=None,
+            model_name=("CLIP ViT-B/32 zero-shot" if event.category == "fight" else None),
+            model_version=("ViT-B-32-quickgelu/openai" if event.category == "fight" else None),
             ai_confidence=None,
             evidence_json=json.dumps(evidence),
             track_ids_json=json.dumps(event.track_ids),

@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     # --- Evidence storage ---
     EVIDENCE_STORAGE_DIR: str = str(BACKEND_ROOT.parent / "evidence_storage")
+    SAMPLE_DATA_DIR: str = str(BACKEND_ROOT.parent / "sample_data")
     EVIDENCE_RETENTION_DAYS: int = 30
 
     # --- SMTP (optional; notifications degrade gracefully if unset) ---

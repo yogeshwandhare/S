@@ -29,6 +29,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from vision_worker.detectors.base import Detector, DetectorUnavailableError
+from vision_worker.detectors.clip_violence_classifier import (
+    ClipViolenceClassifier,
+    ViolencePrediction,
+)
+from vision_worker.detectors.abandoned_object_classifier import YoloAbandonedObjectClassifier
 from vision_worker.pipeline.annotate import annotate_frame, encode_jpeg
 from vision_worker.pipeline.source import (
     CameraConnectionError,
@@ -40,6 +45,7 @@ from vision_worker.rules.aggressive_motion import AggressiveMotionRule
 from vision_worker.rules.events import RuleTriggerEvent
 from vision_worker.rules.intrusion import ZoneIntrusionRule
 from vision_worker.rules.weapon_confirmation import WeaponConfirmationRule
+from vision_worker.rules.violence_confirmation import ViolenceConfirmationRule
 from vision_worker.trackers.iou_tracker import IoUTracker
 from vision_worker.types import Track
 
@@ -73,9 +79,12 @@ class CameraWorker:
         inference_fps: float = 5.0,
         zone_rules: list[ZoneIntrusionRule] | None = None,
         abandoned_object_rule: AbandonedObjectRule | None = None,
+        abandoned_object_classifier: YoloAbandonedObjectClassifier | None = None,
         aggressive_motion_rule: AggressiveMotionRule | None = None,
         weapon_detector: Detector | None = None,
         weapon_confirmation_rule: WeaponConfirmationRule | None = None,
+        violence_classifier: ClipViolenceClassifier | None = None,
+        violence_confirmation_rule: ViolenceConfirmationRule | None = None,
         on_rule_triggered: Callable[[RuleTriggerEvent, bytes], None] | None = None,
     ) -> None:
         self.camera_id = camera_id
@@ -85,9 +94,12 @@ class CameraWorker:
         self._tracker = IoUTracker()
         self._zone_rules = zone_rules or []
         self._abandoned_object_rule = abandoned_object_rule
+        self._abandoned_object_classifier = abandoned_object_classifier
         self._aggressive_motion_rule = aggressive_motion_rule
         self._weapon_detector = weapon_detector
         self._weapon_confirmation_rule = weapon_confirmation_rule
+        self._violence_classifier = violence_classifier
+        self._violence_confirmation_rule = violence_confirmation_rule
         self._on_rule_triggered = on_rule_triggered
 
         self._frame_queue: queue.Queue = queue.Queue(maxsize=1)
@@ -212,6 +224,7 @@ class CameraWorker:
     def _inference_loop(self) -> None:
         min_interval = 1.0 / self._inference_fps
         last_run = 0.0
+        last_violence_run = 0.0
         completion_times: list[float] = []
         while not self._stop_event.is_set():
             try:
@@ -224,13 +237,33 @@ class CameraWorker:
                 continue  # throttle to configured inference FPS
             last_run = now
 
+            violence_prediction: ViolencePrediction | None = None
+            if self._violence_classifier is not None and now - last_violence_run >= 1.0:
+                last_violence_run = now
+                try:
+                    violence_prediction = self._violence_classifier.predict(frame)
+                except Exception:
+                    logger.exception(
+                        "Camera %s: CLIP violence classification failed", self.camera_id
+                    )
+
             if self._detector is None:
                 # No detector configured -- still serve the raw feed so the
                 # dashboard's Live Monitoring page shows *something* useful,
                 # clearly without any detection overlay.
                 jpeg = encode_jpeg(frame)
+                self._evaluate_rules(
+                    [],
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
+                    now=now,
+                    snapshot=jpeg,
+                    frame_bgr=frame,
+                    violence_prediction=violence_prediction,
+                )
                 with self._lock:
                     self._latest_jpeg = jpeg
+                    self._latest_tracks = []
                 continue
 
             try:
@@ -239,7 +272,9 @@ class CameraWorker:
                 logger.error("Camera %s: detector unavailable: %s", self.camera_id, exc)
                 with self._lock:
                     self._health.last_error = f"Detector unavailable: {exc}"
-                continue
+                # Continue with empty tracks so the independent frame-level
+                # violence classifier can still produce a review alert.
+                detections = []
 
             tracks = self._tracker.update(detections)
             annotated = annotate_frame(frame, tracks)
@@ -270,6 +305,8 @@ class CameraWorker:
                 now=now,
                 snapshot=jpeg,
                 weapon_detections=weapon_detections,
+                frame_bgr=frame,
+                violence_prediction=violence_prediction,
             )
 
             with self._lock:
@@ -284,6 +321,8 @@ class CameraWorker:
         now: float,
         snapshot: bytes,
         weapon_detections: list | None = None,
+        frame_bgr=None,
+        violence_prediction: ViolencePrediction | None = None,
     ) -> None:
         """Runs every configured rule against this frame's tracks and
         forwards any trigger to the backend-provided callback. Errors here
@@ -294,6 +333,7 @@ class CameraWorker:
             and self._abandoned_object_rule is None
             and self._aggressive_motion_rule is None
             and self._weapon_confirmation_rule is None
+            and self._violence_confirmation_rule is None
         ):
             return
 
@@ -322,7 +362,12 @@ class CameraWorker:
 
         if self._abandoned_object_rule is not None:
             try:
-                abandoned = self._abandoned_object_rule.evaluate(tracks, now)
+                abandoned = self._abandoned_object_rule.evaluate(
+                    tracks,
+                    now,
+                    frame_bgr=frame_bgr,
+                    classifier=self._abandoned_object_classifier,
+                )
             except Exception:
                 logger.exception(
                     "Camera %s: abandoned-object rule evaluation failed", self.camera_id
@@ -339,6 +384,17 @@ class CameraWorker:
                         evidence={
                             "object_class": abandoned_ev.class_name,
                             "stationary_seconds": round(abandoned_ev.stationary_seconds, 1),
+                            **(
+                                {
+                                    "classifier_label": abandoned_ev.classifier_label,
+                                    "classifier_confidence": round(
+                                        abandoned_ev.classifier_confidence, 4
+                                    ),
+                                }
+                                if abandoned_ev.classifier_label is not None
+                                and abandoned_ev.classifier_confidence is not None
+                                else {}
+                            ),
                         },
                     )
                 )
@@ -388,6 +444,35 @@ class CameraWorker:
                             "consecutive_frames": weapon_ev.consecutive_frames,
                             "note": "Possible weapon -- review required. Not a confirmed weapon.",
                         },
+                    )
+                )
+
+        if self._violence_confirmation_rule is not None and violence_prediction is not None:
+            try:
+                violence_events = self._violence_confirmation_rule.evaluate(
+                    violence_prediction, now
+                )
+            except Exception:
+                logger.exception("Camera %s: violence confirmation rule failed", self.camera_id)
+                violence_events = []
+            for violence_ev in violence_events:
+                events.append(
+                    RuleTriggerEvent(
+                        category="fight",
+                        camera_id=self.camera_id,
+                        track_ids=[],
+                        severity=violence_ev.severity,
+                        occurred_at=occurred_at,
+                        evidence={
+                            "prediction": violence_ev.label,
+                            "similarity": round(violence_ev.similarity, 3),
+                            "consecutive_frames": violence_ev.consecutive_frames,
+                            "note": (
+                                "Possible violence -- review required; model score is not "
+                                "a probability."
+                            ),
+                        },
+                        dedup_key=f"fight:{self.camera_id}:clip-violence",
                     )
                 )
 

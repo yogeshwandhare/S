@@ -17,9 +17,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vision_worker.detectors.weapon_detector import WEAPON_CLASSES
 from vision_worker.rules.geometry import euclidean_distance
 from vision_worker.types import Detection
+
+# Class names found in common weapon datasets. Match normalized checkpoint
+# labels so the alert rule works with the linked YOLOv8 model's metadata.
+_WEAPON_LABELS = frozenset(
+    {
+        "pistol", "pistols", "knife", "knives", "gun", "guns", "handgun",
+        "handguns", "firearm", "firearms", "rifle", "rifles", "shotgun",
+        "shotguns", "revolver", "revolvers", "weapon", "weapons",
+    }
+)
+
+
+def _is_weapon_label(class_name: str) -> bool:
+    normalized = " ".join(class_name.casefold().replace("_", " ").replace("-", " ").split())
+    return normalized in _WEAPON_LABELS
 
 
 @dataclass
@@ -54,7 +68,7 @@ class WeaponConfirmationRule:
         self._candidates: list[_Candidate] = []
 
     def evaluate(self, detections: list[Detection], now: float) -> list[WeaponConfirmedEvent]:
-        weapon_detections = [d for d in detections if d.class_name in WEAPON_CLASSES]
+        weapon_detections = [d for d in detections if _is_weapon_label(d.class_name)]
 
         for c in self._candidates:
             c.matched_this_frame = False

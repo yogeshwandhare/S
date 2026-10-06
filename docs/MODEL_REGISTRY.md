@@ -25,6 +25,35 @@ docstring).
 | Model | License | Source | Status |
 |---|---|---|---|
 | **Fine-tuned YOLO11n, ONNX** | AGPL-3.0-only (training framework: `ultralytics`); dataset CC BY-SA 4.0 | Trained locally via `scripts/weapon_detection/` on the Sohas dataset (`github.com/ari-dasci/OD-WeaponDetection`, University of Granada) | **Trained, evaluated, and verified live end-to-end** -- see below for exactly what "trained" means here and its real, measured accuracy. |
+| **Weapons-and-Knives YOLOv8** (optional) | Upstream README claims MIT, GitHub repository is labeled GPL-3.0; Ultralytics runtime is AGPL-3.0 | [JoaoAssalim/Weapons-and-Knives-Detector-with-YOLOv8](https://github.com/JoaoAssalim/Weapons-and-Knives-Detector-with-YOLOv8), checkpoint expected at `runs/detect/Normal_Compressed/weights/best.pt` | Adapter/registry support added. Must be loaded from a local `.pt` file and explicitly enabled with `scripts/download_models.py --enable-weapons-yolov8 <path>`. The model is not included in this repository; validate licensing and detection quality before deployment. |
+| **CLIP ViT-B/32 violence triage** (optional) | Upstream violence-detection repository declares no license; OpenCLIP library is MIT | [sukhitashvili/violence-detection](https://github.com/sukhitashvili/violence-detection), OpenAI ViT-B/32 weights loaded with `open-clip-torch` and cached in `models/clip/` | Integrated as a frame-level zero-shot classifier using the upstream scene prompts. It is not a temporal action model and its cosine similarity is not a calibrated probability. Three repeated fight/violence labels create a human-review incident; validate before deployment. |
+
+## Abandoned-object classification
+
+The existing luggage rule requires a backpack, handbag, or suitcase to remain
+stationary for 60 seconds with no person nearby. An optional classifier can
+then confirm the candidate from its image crop. Enable it only if the supplied
+checkpoint is a YOLO classification model and has a luggage class such as
+`bag`, `backpack`, `handbag`, `suitcase`, or `luggage`; registration validates
+both facts. This checkpoint classifies luggage types; it does not determine
+whether an item is abandoned. The existing dwell-time and owner-distance rule
+determines candidate status.
+The upstream README describes a YOLO11 classifier and warns that its examples
+depend on a fixed camera/background and stable lighting. Its repository does
+not declare a license; the Ultralytics runtime is AGPL-3.0.
+
+Clone [erwinyo/Abandoned-Object-Detection](https://github.com/erwinyo/Abandoned-Object-Detection),
+copy `cls-model.pt` to `models/abandoned/cls-model.pt`, rebuild the backend, and
+run:
+
+```powershell
+docker compose exec backend python scripts/download_models.py --enable-abandoned-object-classifier /models/abandoned/cls-model.pt
+docker compose restart backend
+```
+
+If the checkpoint labels do not meet the validation rule, registration remains
+disabled and prints the labels it found. Alerts remain candidates for human
+review, not claims that an object is dangerous.
 
 **Dataset**: the Sohas weapons dataset from Pérez-Hernández et al.,
 *"Object Detection Binary Classifiers methodology based on deep learning
@@ -78,10 +107,30 @@ adapter: never enabled by default, and `scripts/download_models.py
 --enable-weapon-detector <path>` requires the same explicit
 acknowledgement.
 
+The linked YOLOv8 checkpoint can also run through the weapon alert pipeline.
+For Docker, copy its `.pt` file to `models/weapons/yolov8-best.pt`, then
+rebuild the backend with `docker compose up -d --build backend`. Register it
+inside the container so the database and checkpoint paths match:
+`docker compose exec backend python scripts/download_models.py --enable-weapons-yolov8 /models/weapons/yolov8-best.pt`.
+Registration validates the checkpoint and reads its class labels. Camera
+workers create possible-weapon incidents after repeated detections; incidents
+remain pending human review. The upstream README's MIT claim conflicts with
+GitHub's GPL-3.0 repository classification, and Ultralytics is AGPL-3.0, so
+resolve licensing for your use before enabling it in a distributed deployment.
+
 ## Fight / aggressive-activity recognition
 
-**No validated action-recognition classifier is used.** Per the project
-brief's explicit fallback, motion between tracked people is evaluated with
+An optional CLIP-based frame classifier is available for violence triage.
+Enable it with `docker compose up -d --build backend`, then
+`docker compose exec backend python scripts/download_models.py --enable-violence-detection`,
+and restart the backend. It samples each active camera at up to one frame per
+second, selects the closest scene prompt, and requires three consecutive
+violence labels before creating a **possible violence -- review required**
+incident. CLIP cosine similarity is not a probability, the classifier is not
+temporal, and it is not production-validated. The upstream repository has no
+declared license; its code is not vendored here.
+
+The existing motion rule also evaluates motion between tracked people with
 a heuristic (`vision_worker/vision_worker/rules/aggressive_motion.py`):
 two or more people in close proximity, each moving rapidly, sustained
 across several consecutive frames. This is deliberately conservative about

@@ -5,12 +5,14 @@ import { PageHeader } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CameraStatusDot } from "@/components/ui/badges";
+import { useSampleVideos } from "@/hooks/useDemo";
 import {
   useCameras,
   useCreateCamera,
   useDeleteCamera,
   useModels,
   useTestCameraConnection,
+  useUploadCameraVideo,
   useUpdateCamera,
   useUsbDevices,
 } from "@/hooks/useCameras";
@@ -63,9 +65,13 @@ function ChangeUsbDevice({ cameraId }: { cameraId: string }) {
 
 function AddCameraForm({ onDone }: { onDone: () => void }) {
   const createCamera = useCreateCamera();
+  const uploadVideo = useUploadCameraVideo();
+  const sampleVideos = useSampleVideos();
   const [name, setName] = useState("");
   const [sourceType, setSourceType] = useState<CameraSourceType>("file");
   const [sourceUri, setSourceUri] = useState("");
+  const [manualFileEntry, setManualFileEntry] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function handleSubmit(e: FormEvent) {
@@ -77,6 +83,7 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
         onSuccess: () => {
           setName("");
           setSourceUri("");
+          setUploadedFileName(null);
           onDone();
         },
         onError: (err) => setError(err instanceof ApiError ? err.message : "Failed to add camera"),
@@ -101,10 +108,16 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
           <label className="text-xs text-text-muted">Source type</label>
           <select
             value={sourceType}
-            onChange={(e) => { setSourceType(e.target.value as CameraSourceType); setSourceUri(""); }}
+            onChange={(e) => {
+              const nextType = e.target.value as CameraSourceType;
+              setSourceType(nextType);
+              setSourceUri("");
+              setManualFileEntry(false);
+              setUploadedFileName(null);
+            }}
             className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm text-text outline-none focus-visible:border-cyan"
           >
-            <option value="file">Video file (sample_data/)</option>
+            <option value="file">Video file (sample or upload)</option>
             <option value="rtsp">RTSP stream</option>
             <option value="http">HTTP / MJPEG stream</option>
             <option value="usb">USB webcam</option>
@@ -114,15 +127,91 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
           <label className="text-xs text-text-muted">
             {sourceType === "file" ? "Filename" : sourceType === "usb" ? "Connected camera" : sourceType === "http" ? "Video stream URL" : "RTSP URL"}
           </label>
-          {sourceType === "usb" ? <UsbDevicePicker value={sourceUri} onChange={setSourceUri} /> : <input
+          {sourceType === "usb" ? <UsbDevicePicker value={sourceUri} onChange={setSourceUri} /> : sourceType === "file" ? (
+            <div className="space-y-2">
+              {uploadedFileName ? (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs">
+                  <span className="truncate text-text">Using {uploadedFileName}</span>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setUploadedFileName(null); setSourceUri(""); }}>
+                    Choose another
+                  </Button>
+                </div>
+              ) : !manualFileEntry && (
+                <select
+                  value={sourceUri}
+                  onChange={(e) => {
+                    if (e.target.value === "__manual__") {
+                      setManualFileEntry(true);
+                      setSourceUri("");
+                    } else {
+                      setSourceUri(e.target.value);
+                    }
+                  }}
+                  required
+                  aria-label="Sample video file"
+                  className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm text-text outline-none"
+                >
+                  <option value="">{sampleVideos.isLoading ? "Loading sample videos…" : "Choose a sample video"}</option>
+                  {sampleVideos.data?.map((video) => (
+                    <option key={video.filename} value={video.filename}>{video.filename}</option>
+                  ))}
+                  <option value="__manual__">Enter filename manually…</option>
+                </select>
+              )}
+              {!uploadedFileName && manualFileEntry && (
+                <div className="space-y-1">
+                  <input
+                    required
+                    value={sourceUri}
+                    onChange={(e) => setSourceUri(e.target.value)}
+                    placeholder="synthetic_pipeline_test.mp4"
+                    aria-label="Video filename under sample_data"
+                    className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm text-text outline-none focus-visible:border-cyan"
+                  />
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setManualFileEntry(false); setSourceUri(""); }}>
+                    Choose from samples
+                  </Button>
+                </div>
+              )}
+              {!uploadedFileName && sampleVideos.error && <p className="text-xs text-severity-critical">Could not load sample videos. You can enter a filename manually.</p>}
+              {!uploadedFileName && !sampleVideos.isLoading && sampleVideos.data?.length === 0 && !manualFileEntry && (
+                <p className="text-xs text-text-muted">No sample videos found. Add an MP4 to sample_data/ or enter a filename manually.</p>
+              )}
+              {!uploadedFileName && !manualFileEntry && sourceUri && (
+                <p className="text-xs text-text-muted">{sampleVideos.data?.find((video) => video.filename === sourceUri)?.description}</p>
+              )}
+              {!uploadedFileName && (
+                <div className="space-y-1 border-t border-border pt-2">
+                  <label className="text-xs text-text-muted" htmlFor="camera-video-upload">Or choose an MP4 from this device (up to 500 MB)</label>
+                  <input
+                    id="camera-video-upload"
+                    type="file"
+                    accept="video/mp4,.mp4"
+                    disabled={uploadVideo.isPending}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      uploadVideo.mutate(file, {
+                        onSuccess: (uploaded) => {
+                          setSourceUri(uploaded.source_uri);
+                          setUploadedFileName(uploaded.original_filename);
+                          setManualFileEntry(false);
+                        },
+                      });
+                      event.target.value = "";
+                    }}
+                    className="block w-full text-xs text-text-muted file:mr-2 file:rounded-md file:border-0 file:bg-surface-raised file:px-2 file:py-1 file:text-xs file:text-text"
+                  />
+                  {uploadVideo.isPending && <p className="text-xs text-text-muted">Uploading video…</p>}
+                  {uploadVideo.error && <p className="text-xs text-severity-critical">{uploadVideo.error.message}</p>}
+                </div>
+              )}
+            </div>
+          ) : <input
             required
             value={sourceUri}
             onChange={(e) => setSourceUri(e.target.value)}
-            placeholder={
-              sourceType === "file"
-                ? "synthetic_pipeline_test.mp4"
-                : sourceType === "http" ? "http://192.168.1.19:8080/video" : "rtsp://192.168.1.50:554/stream1"
-            }
+            placeholder={sourceType === "http" ? "http://192.168.1.19:8080/video" : "rtsp://192.168.1.50:554/stream1"}
             className="w-full rounded-md border border-border-strong bg-surface-raised px-3 py-1.5 text-sm text-text outline-none focus-visible:border-cyan"
           />}
           {sourceType === "http" && <p className="text-xs text-text-muted">
@@ -135,8 +224,8 @@ function AddCameraForm({ onDone }: { onDone: () => void }) {
         <Button type="button" variant="ghost" size="sm" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" size="sm" disabled={createCamera.isPending}>
-          {createCamera.isPending ? "Adding…" : "Add camera"}
+        <Button type="submit" size="sm" disabled={createCamera.isPending || uploadVideo.isPending}>
+          {createCamera.isPending ? "Adding…" : uploadVideo.isPending ? "Uploading video…" : "Add camera"}
         </Button>
       </div>
     </form>

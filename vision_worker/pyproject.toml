@@ -13,6 +13,8 @@ dependencies = [
 rfdetr = ["rfdetr>=1.10,<2.0"]
 # Optional AGPL-3.0 adapter -- never enabled by default (see docs/MODEL_REGISTRY.md).
 yolo = ["ultralytics>=8.4,<9.0"]
+# OpenAI CLIP ViT-B/32 zero-shot scene classifier (optional violence triage).
+violence = ["open-clip-torch>=2.24,<4.0"]
 
 [build-system]
 requires = ["hatchling"]

@@ -24,11 +24,11 @@ COPY vision_worker/pyproject.toml /vision_worker/pyproject.toml
 # Keep the large third-party dependencies cached when application code changes.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project \
-        --no-install-package smartvision-vision-worker --no-dev --extra rfdetr
+        --no-install-package smartvision-vision-worker --no-dev --extra rfdetr --extra yolo --extra violence
 
 COPY vision_worker/ /vision_worker/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra rfdetr
+    uv sync --frozen --no-dev --extra rfdetr --extra yolo --extra violence
 
 COPY backend/ .
 COPY scripts/create_admin.py ./scripts/create_admin.py

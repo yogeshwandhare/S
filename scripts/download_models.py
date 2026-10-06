@@ -12,6 +12,9 @@ Usage:
     # see the confirmation prompt this prints before doing anything.
     python scripts/download_models.py --enable-yolo-agpl
 
+    # Optionally enable zero-shot CLIP violence triage (downloads model weights).
+    python scripts/download_models.py --enable-violence-detection
+
 This script is intentionally the ONLY way a model gets marked `enabled` in
 the registry (there is no HTTP endpoint for it) -- enabling a detector,
 especially one with copyleft licensing obligations, should be a deliberate
@@ -210,6 +213,118 @@ def _register_weapon_detector(db, onnx_path: str) -> None:
     db.commit()
 
 
+def _register_weapon_yolov8(db, checkpoint_path: str) -> None:
+    """Register the linked repo's YOLOv8 checkpoint for weapon alerts."""
+    checkpoint = Path(checkpoint_path).expanduser().resolve()
+    config = _upsert(
+        db,
+        task=ModelTask.WEAPON_DETECTION,
+        name="weapons-and-knives-yolov8",
+        # Upstream README claims MIT while GitHub marks the repository GPL-3.0;
+        # running the checkpoint also uses the AGPL-3.0 Ultralytics package.
+        license_="Upstream MIT/GPL-3.0 conflict; Ultralytics AGPL-3.0",
+        checkpoint_source=(
+            "https://github.com/JoaoAssalim/Weapons-and-Knives-Detector-with-YOLOv8"
+        ),
+    )
+    try:
+        if not checkpoint.is_file():
+            raise FileNotFoundError(f"checkpoint does not exist: {checkpoint}")
+        from ultralytics import YOLO
+
+        model = YOLO(str(checkpoint))
+        labels = list(model.names.values())
+        if not labels:
+            raise ValueError("checkpoint has no class names")
+        config.checkpoint_path = str(checkpoint)
+        config.supported_classes_json = json.dumps(labels)
+        config.is_available = True
+        config.enabled = True
+        print(f"Registered and enabled YOLOv8 weapon detector: {checkpoint}")
+        print(f"Checkpoint classes: {', '.join(labels)}")
+    except Exception as exc:  # noqa: BLE001
+        config.is_available = False
+        config.enabled = False
+        print(f"FAILED to load YOLOv8 weapon checkpoint: {exc}")
+    db.commit()
+
+
+def _register_violence_classifier(db) -> None:
+    """Load and register the optional CLIP zero-shot violence classifier."""
+    from vision_worker.detectors.clip_violence_classifier import (
+        DEFAULT_LABELS,
+        ClipViolenceClassifier,
+    )
+
+    config = _upsert(
+        db,
+        task=ModelTask.ACTION_RECOGNITION,
+        name="violence-detection-clip-vit-b32",
+        license_="Upstream repo: no license; OpenCLIP library: MIT",
+        checkpoint_source=(
+            "https://github.com/sukhitashvili/violence-detection "
+        "(OpenAI ViT-B/32 weights loaded by open-clip-torch)"
+        ),
+    )
+    try:
+        # Loading validates CLIP and downloads its ViT-B/32 weights into the
+        # persistent Hugging Face cache before enabling it in the registry.
+        ClipViolenceClassifier(labels=DEFAULT_LABELS, device="cpu")
+        config.supported_classes_json = json.dumps(DEFAULT_LABELS)
+        config.confidence_threshold = 0.23
+        config.is_available = True
+        config.enabled = True
+        config.notes = (
+            "Frame-level zero-shot similarity triage; three consecutive violence labels "
+            "required. Similarity is not a calibrated probability; human review required."
+        )
+        print("Registered and enabled CLIP ViT-B/32 violence triage.")
+    except Exception as exc:  # noqa: BLE001
+        config.is_available = False
+        config.enabled = False
+        print(f"FAILED to load CLIP violence classifier: {exc}")
+    db.commit()
+
+
+def _register_abandoned_object_classifier(db, checkpoint_path: str) -> None:
+    """Validate/register the optional upstream YOLO classification checkpoint."""
+    checkpoint = Path(checkpoint_path).expanduser().resolve()
+    config = _upsert(
+        db,
+        task=ModelTask.OBJECT_CLASSIFICATION,
+        name="abandoned-object-yolo11-classification",
+        license_="Upstream license unspecified; Ultralytics runtime AGPL-3.0",
+        checkpoint_source=(
+            "https://github.com/erwinyo/Abandoned-Object-Detection (cls-model.pt)"
+        ),
+    )
+    try:
+        from vision_worker.detectors.abandoned_object_classifier import (
+            YoloAbandonedObjectClassifier,
+        )
+
+        classifier = YoloAbandonedObjectClassifier(str(checkpoint))
+        config.checkpoint_path = str(checkpoint)
+        config.supported_classes_json = json.dumps(
+            list(classifier.class_names.values())
+        )
+        config.confidence_threshold = 0.5
+        config.is_available = True
+        config.enabled = True
+        config.notes = (
+            "Only confirms tracked luggage candidates after stationary-time and owner-"
+            "proximity checks. The classifier recognizes luggage types, not abandoned "
+            "status; candidate alerts need human review."
+        )
+        print(f"Registered and enabled abandoned-object classifier: {checkpoint}")
+        print(f"Checkpoint classes: {', '.join(classifier.class_names.values())}")
+    except Exception as exc:  # noqa: BLE001
+        config.is_available = False
+        config.enabled = False
+        print(f"FAILED to load abandoned-object checkpoint: {exc}")
+    db.commit()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -231,6 +346,33 @@ def main() -> int:
             "Register and enable a locally-trained weapon detector from the given "
             "ONNX file path (produced by scripts/weapon_detection/export_onnx.py). "
             "Same AGPL-3.0 considerations as --enable-yolo-agpl -- see docs/MODEL_REGISTRY.md."
+        ),
+    )
+    parser.add_argument(
+        "--enable-weapons-yolov8",
+        metavar="CHECKPOINT",
+        default=None,
+        help=(
+            "Register and enable the linked Weapons-and-Knives YOLOv8 .pt checkpoint. "
+            "The upstream README says MIT but GitHub labels it GPL-3.0; Ultralytics "
+            "is AGPL-3.0. Resolve licensing before distributing a deployment."
+        ),
+    )
+    parser.add_argument(
+        "--enable-violence-detection",
+        action="store_true",
+        help=(
+            "Download/validate CLIP ViT-B/32 and enable frame-level violence triage. "
+            "The upstream repository has no declared license; alerts require human review."
+        ),
+    )
+    parser.add_argument(
+        "--enable-abandoned-object-classifier",
+        metavar="CHECKPOINT",
+        default=None,
+        help=(
+            "Register the upstream YOLO11 classification checkpoint (cls-model.pt) "
+            "for abandoned-luggage candidate confirmation."
         ),
     )
     args = parser.parse_args()
@@ -261,6 +403,26 @@ def main() -> int:
                 "\nSkipping weapon detector registration (not requested). "
                 "Pass --enable-weapon-detector <path-to-onnx> once you've trained one "
                 "(see scripts/weapon_detection/)."
+            )
+
+        if args.enable_weapons_yolov8:
+            print(
+                "\nEnabling the upstream YOLOv8 weapon model. The upstream README and "
+                "GitHub license metadata conflict (MIT vs GPL-3.0); Ultralytics is "
+                "AGPL-3.0. Confirm licensing for your deployment before distribution."
+            )
+            _register_weapon_yolov8(db, args.enable_weapons_yolov8)
+
+        if args.enable_violence_detection:
+            _register_violence_classifier(db)
+
+        if args.enable_abandoned_object_classifier:
+            print(
+                "\nThe upstream repository does not declare a license; Ultralytics "
+                "uses AGPL-3.0. Review both before distributing a deployment."
+            )
+            _register_abandoned_object_classifier(
+                db, args.enable_abandoned_object_classifier
             )
 
     print("\nDone. Restart the backend for camera workers to pick up the change:")

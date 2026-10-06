@@ -14,6 +14,7 @@ worker never blocks or errors out because of missing SMTP settings.
 from __future__ import annotations
 
 import logging
+import mimetypes
 import smtplib
 import ssl
 from datetime import UTC, datetime, timedelta
@@ -177,6 +178,45 @@ def _send_email(to_address: str, incident: Incident) -> None:
     )
     message["To"] = to_address
     message.set_content(body)
+
+    # Attach the saved incident snapshot as an inline MIME image. The plain
+    # text body remains available to mail clients that do not render HTML.
+    html_body = (
+        f"<p>A {category_label} incident was flagged for human review.</p>"
+        f"<ul><li>Severity: {incident.severity.value}</li>"
+        f"<li>Camera ID: {incident.camera_id}</li>"
+        f"<li>Detected at: {incident.event_started_at.isoformat()}</li></ul>"
+    )
+    snapshot_data = None
+    if incident.snapshot_path:
+        try:
+            with open(incident.snapshot_path, "rb") as snapshot_file:
+                snapshot_data = snapshot_file.read()
+        except OSError:
+            logger.warning("Could not read incident snapshot for email: %s", incident.id)
+
+    if snapshot_data:
+        mime_type, _ = mimetypes.guess_type(incident.snapshot_path or "")
+        maintype, subtype = (mime_type or "image/jpeg").split("/", 1)
+        html_body += '<p><img src="cid:incident-snapshot" alt="Incident snapshot" style="max-width:100%;height:auto"></p>'
+    else:
+        maintype = subtype = ""
+
+    html_body += (
+        f'<p><a href="{review_url}">Review incident</a></p>'
+        '<p>This is an automated alert from a decision-support prototype. '
+        "It requires human review before any action is taken.</p>"
+    )
+    message.add_alternative(html_body, subtype="html")
+    if snapshot_data:
+        message.get_payload()[-1].add_related(
+            snapshot_data,
+            maintype=maintype,
+            subtype=subtype,
+            cid="<incident-snapshot>",
+            filename="incident-snapshot.jpg",
+            disposition="inline",
+        )
 
     if settings.SMTP_USE_TLS:
         context = ssl.create_default_context()

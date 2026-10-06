@@ -91,9 +91,70 @@ def get_active_weapon_detector(db: Session):
         return None
 
     try:
+        if config.name == "weapons-and-knives-yolov8":
+            # This upstream project ships a YOLOv8 PyTorch checkpoint. Reuse
+            # the existing Ultralytics adapter; its class names come from the
+            # checkpoint metadata and feed the human-review weapon rule.
+            return _build_yolo(config.checkpoint_path)
+
         from vision_worker.detectors.weapon_detector import WeaponDetector
 
         return WeaponDetector(onnx_path=config.checkpoint_path)
     except Exception:
         logger.exception("Failed to load weapon detector despite being marked available.")
+        return None
+
+
+def get_active_violence_classifier(db: Session):
+    """Load the optional CLIP frame classifier registered for action recognition."""
+    config = db.scalar(
+        select(ModelConfig)
+        .where(ModelConfig.task == ModelTask.ACTION_RECOGNITION)
+        .where(ModelConfig.name == "violence-detection-clip-vit-b32")
+        .where(ModelConfig.enabled.is_(True))
+        .where(ModelConfig.is_available.is_(True))
+        .order_by(ModelConfig.updated_at.desc())
+    )
+    if config is None:
+        logger.info("No enabled + available violence classifier in the registry.")
+        return None
+
+    try:
+        import json
+
+        from vision_worker.detectors.clip_violence_classifier import (
+            ClipViolenceClassifier,
+        )
+
+        labels = json.loads(config.supported_classes_json or "null")
+        return ClipViolenceClassifier(labels=labels, device="cpu")
+    except Exception:
+        logger.exception("Failed to load violence classifier despite being marked available.")
+        return None
+
+
+def get_active_abandoned_object_classifier(db: Session):
+    """Load the optional YOLO classification checkpoint for abandoned bags."""
+    config = db.scalar(
+        select(ModelConfig)
+        .where(ModelConfig.task == ModelTask.OBJECT_CLASSIFICATION)
+        .where(ModelConfig.name == "abandoned-object-yolo11-classification")
+        .where(ModelConfig.enabled.is_(True))
+        .where(ModelConfig.is_available.is_(True))
+        .order_by(ModelConfig.updated_at.desc())
+    )
+    if config is None:
+        logger.info("No enabled + available abandoned-object classifier in the registry.")
+        return None
+    if not config.checkpoint_path:
+        logger.error("Abandoned-object classifier registry entry has no checkpoint_path.")
+        return None
+    try:
+        from vision_worker.detectors.abandoned_object_classifier import (
+            YoloAbandonedObjectClassifier,
+        )
+
+        return YoloAbandonedObjectClassifier(config.checkpoint_path)
+    except Exception:
+        logger.exception("Failed to load abandoned-object classifier despite registry status.")
         return None

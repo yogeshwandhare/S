@@ -18,7 +18,7 @@ services:
     ports:
       # Exposed on host only for local debugging (psql, a GUI client).
       # Remove this in a real production deployment.
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
 
   backend:
     build:
@@ -41,12 +41,17 @@ services:
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       INFERENCE_DEVICE: ${INFERENCE_DEVICE:-auto}
+      HF_HOME: /models/clip
       USB_CAMERA_BRIDGE_URL: ${USB_CAMERA_BRIDGE_URL:-}
       EVIDENCE_STORAGE_DIR: /data/evidence
+      SAMPLE_DATA_DIR: /data/sample_data
     volumes:
       - evidence_storage:/data/evidence
       - ./sample_data:/data/sample_data:ro
       - ./models/rfdetr:/root/.roboflow/models
+      - ./models/weapons:/models/weapons:ro
+      - ./models/clip:/models/clip
+      - ./models/abandoned:/models/abandoned:ro
     ports:
       # Direct backend access for API docs / debugging. Caddy also proxies
       # /api/* on :8080 for the frontend's same-origin requests.

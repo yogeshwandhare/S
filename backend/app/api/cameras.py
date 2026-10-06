@@ -3,13 +3,15 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.deps import require_admin, require_any_role, require_operator_or_admin
 from app.models.audit_log import AuditLog
@@ -24,10 +26,12 @@ from app.schemas.camera import (
     UsbDeviceInfo,
     UsbDevicesRead,
 )
+from app.services.video_storage import resolve_video_source
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 
 _MJPEG_BOUNDARY = "smartvisionframe"
+_MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
 
 
 def _get_camera_or_404(db: Session, camera_id: uuid.UUID) -> Camera:
@@ -67,6 +71,44 @@ def list_cameras(
 ) -> list[Camera]:
     cameras = list(db.scalars(select(Camera).order_by(Camera.created_at)))
     return [_apply_live_status(c, request) for c in cameras]
+
+
+@router.post("/upload-video")
+async def upload_camera_video(
+    video: UploadFile = File(...),
+    _user: User = Depends(require_admin),
+) -> dict[str, str]:
+    """Store a local MP4 for use as a file-backed camera source."""
+    original_name = Path(video.filename or "video.mp4").name
+    if Path(original_name).suffix.lower() != ".mp4":
+        raise HTTPException(status_code=400, detail="Please select an MP4 video file")
+
+    upload_dir = Path(get_settings().EVIDENCE_STORAGE_DIR) / "camera_uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{uuid.uuid4()}.mp4"
+    destination = upload_dir / stored_name
+    size = 0
+    try:
+        with destination.open("wb") as output:
+            while chunk := await video.read(1024 * 1024):
+                size += len(chunk)
+                if size > _MAX_VIDEO_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Video must be 500 MB or smaller")
+                output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await video.close()
+
+    if size == 0:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="The selected video is empty")
+
+    return {
+        "source_uri": f"uploads/{stored_name}",
+        "original_filename": original_name,
+    }
 
 
 @router.post("", response_model=CameraRead, status_code=status.HTTP_201_CREATED)
@@ -222,10 +264,7 @@ def test_camera_connection(
 
     uri = camera.source_uri
     if camera.source_type.value == "file":
-        sample_dir = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "sample_data")
-        )
-        uri = os.path.normpath(os.path.join(sample_dir, uri))
+        uri = resolve_video_source(uri)
 
     source = FrameSource(
         FrameSourceConfig(source_type=VwSourceType(camera.source_type.value), uri=uri)

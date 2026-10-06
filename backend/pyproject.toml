@@ -25,6 +25,8 @@ rfdetr = ["smartvision-vision-worker[rfdetr]"]
 # The opt-in AGPL-3.0 detector adapter -- see docs/MODEL_REGISTRY.md and
 # scripts/download_models.py before enabling this.
 yolo = ["smartvision-vision-worker[yolo]"]
+# Optional CLIP-based, frame-level violence classifier.
+violence = ["smartvision-vision-worker[violence]"]
 
 [dependency-groups]
 dev = [
